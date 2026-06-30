@@ -72,6 +72,4 @@ Bu proje eğitim amaçlıdır. Aşağıdaki noktalar gerçek bir üretim ortamı
 - **IV her iletimde yeniden üretilmemiştir.** Gerçek kullanımda her şifreleme işlemi için yeni bir IV üretilmeli ve paketin başına eklenmelidir.
 - **AES anahtarı (K) düz metin dosyada saklanmıştır.** Bu yalnızca demo amaçlıdır; gerçek kullanımda anahtar yönetim sistemleri (KMS) veya güvenli bir kanal (örneğin GPG ile şifrelenmiş iletim) kullanılmalıdır.
 
-## Lisans
 
-Bu proje eğitim amaçlı olarak hazırlanmıştır.
