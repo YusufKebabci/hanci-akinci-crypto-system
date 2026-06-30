@@ -1,0 +1,518 @@
+
+BÖLÜM 1 — KURULUM VE KLASÖR YAPISI
+
+Gerekli programlar kuruluyor ve klasör yapısı oluşturuluyor. gnupg GPG işlemleri için,
+zip ve unzip sıkıştırma için, openssl AES şifreleme için, python3 ise LCG hesaplama ve
+lookup tablosu için kullanılacak. Proje klasörü oluşturulduktan sonra her terminal kendi
+klasörüne giriyor ve bir daha oradan çıkmıyor. Sol terminal ~/hanci_proje/HANCI dizininde,
+sağ terminal ~/hanci_proje/AKINCI dizininde kalacak.
+
+HER İKİ TERMİNALDE ÇALIŞTIR 
+
+sudo apt update
+sudo apt install gnupg zip unzip openssl python3 -y
+
+mkdir -p ~/hanci_proje/HANCI ~/hanci_proje/AKINCI
+
+HANCI 
+
+cd ~/hanci_proje/HANCI
+
+AKINCI 
+
+cd ~/hanci_proje/AKINCI
+
+
+
+BÖLÜM 2 — GPG ANAHTAR ÜRETİMİ
+
+Her taraf kendi GPG anahtarını kendi terminalinde üretiyor. RSA-4096 bit seçiliyor çünkü
+günümüzde kırılması hesaplama açısından mümkün değil. 2 yıl geçerlilik süresi belirleniyor.
+Passphrase boş bırakılıyor çünkü bu bir demo ortamı. Gerçek hayatta güçlü bir passphrase
+zorunlu olurdu. Anahtar üretildikten sonra her taraf kendi açık anahtarını .asc dosyasına
+aktarıyor. Bu dosyalar karşı tarafa iletilmek üzere hazırlanıyor.
+
+HANCI
+
+gpg --full-generate-key
+
+gpg --armor --export hanci@gmail.com > hanci_pub.asc
+head -2 hanci_pub.asc
+
+
+AKINCI
+
+gpg --full-generate-key
+
+gpg --armor --export akinci@gmail.com> akinci_pub.asc
+head -2 akinci_pub.asc
+
+
+BÖLÜM 3 — ANAHTAR PAYLAŞIMI VE GÜVEN  
+
+Taraflar açık anahtarlarını birbirine iletiyor. Gerçek hayatta bu e-posta veya USB ile
+yapılırdı, burada dosya kopyasıyla simüle ediyoruz. İçe aktarma sırasında "not changed"
+mesajı gelmesi normaldir, anahtarın zaten tanındığı anlamına gelir. Parmak izi
+doğrulamasında her anahtarın benzersiz parmak izi ekranda gösteriliyor. Gerçek hayatta
+bu değerler telefon veya yüz yüze karşılaştırılır. Eşleşiyorsa güvenilir kabul edilir.
+Anahtar imzalama işlemi "bu anahtarın bu kişiye ait olduğunu doğruladım" anlamına
+geliyor. Buna Web of Trust modeli deniyor. Son olarak her iki taraf da birbirine Ultimate
+yani en üst seviyede güven veriyor.
+
+HANCI 
+
+cp ../AKINCI/akinci_pub.asc .
+gpg --import akinci_pub.asc
+
+gpg --fingerprint hanci@gmail.com
+gpg --fingerprint akinci@gmail.com
+
+gpg --sign-key akinci@gmail.com
+
+gpg --edit-key akinci@gmail.com
+
+AKINCI
+
+cp ../HANCI/hanci_pub.asc .
+gpg --import hanci_pub.asc
+
+gpg --fingerprint akinci@gmail.com
+gpg --fingerprint hanci@gmail.com
+
+gpg --sign-key hanci@gmail.com
+
+gpg --edit-key hanci@gmail.com
+
+
+BÖLÜM 4 — GPG TESTİ  
+
+HANCI tarafından AKINCI'ya şifreli ve imzalı bir test mesajı gönderiliyor. Bu test GPG
+altyapısının doğru kurulduğunu doğruluyor. Terminalde "Good signature from HANCI" mesajı
+görünmesi gerekiyor. Bu mesaj hem şifrelemenin hem de imza doğrulamanın başarılı olduğunu
+gösteriyor.
+
+HANCI
+
+echo "Merhaba AKINCI, bu HANCI." > test_mesaj.txt
+
+gpg --encrypt --sign \
+    --recipient akinci@gmail.com \
+    --local-user hanci@gmail.com \
+    test_mesaj.txt
+
+gpg --decrypt test_mesaj.txt.gpg
+
+
+BÖLÜM 5 — AES ANAHTARI (K) ÜRETİMİ  
+
+AES-CTR şifrelemesinde her iki taraf da aynı anahtarı kullanır. Bu anahtarın güvenli
+şekilde paylaşılması gerekir. KEY olarak adlandırılan AES anahtarı 32 byte yani 256 bit
+uzunluğunda, openssl rand ile kriptografik olarak güvenli biçimde üretiliyor. IV olarak
+adlandırılan başlangıç vektörü 16 byte uzunluğunda olup her şifreleme işlemi için farklı
+bir başlangıç noktası belirliyor. Her iki değer anahtar.txt dosyasına kaydediliyor.
+Bu dosya HANCI tarafında üretiliyor ve AKINCI'ya iletiliyor.
+
+HANCI
+
+AES_KEY=$(openssl rand -hex 32)
+AES_IV=$(openssl rand -hex 16)
+
+echo "AES Anahtarı (K) : $AES_KEY"
+echo "AES IV (Nonce)   : $AES_IV"
+
+echo "KEY=$AES_KEY" > anahtar.txt
+echo "IV=$AES_IV"  >> anahtar.txt
+HANCI
+cat anahtar.txt
+
+cp anahtar.txt ../AKINCI/
+echo "Anahtar AKINCI'ya iletildi."
+
+
+BÖLÜM 6 — LOOKUP TABLOSU 
+
+AKINCI tarafında 800.000 satırlık SHA-256 arama tablosu oluşturuluyor. ZIP dosyasının
+byte boyutunu şifreli pakete direkt yazmak yerine hash'ini koyuyoruz. Alıcı bu hash'i
+tabloda aratarak orijinal boyutu buluyor. Tablo formatı her satırda SAYI:HASH şeklinde.
+Bu işlemi Python ile yapıyoruz çünkü saf Bash döngüsüyle her sayı için ayrı bir süreç
+başlatılırdı ve saatlerce sürerdi. Python'da tek süreçte 2-3 dakikada tamamlanıyor.
+
+AKINCI
+
+python3 -c "
+import hashlib
+with open('boyut.txt', 'w') as f:
+    for i in range(1, 800001):
+        h = hashlib.sha256(str(i).encode()).hexdigest()
+        f.write(f'{i}:{h}\n')
+        if i % 100000 == 0:
+            print(f'  {i}/800000 tamamlandı...')
+print('Lookup tablosu hazır.')
+"
+
+wc -l boyut.txt
+head -3 boyut.txt
+
+
+
+BÖLÜM 7 — 5 PLAINMESSAGE BMP
+
+HANCI tarafında farklı boyutlarda 5 adet test BMP dosyası oluşturuluyor. Dosyalar dd
+komutu ile /dev/urandom'dan rastgele byte okunarak üretiliyor. /dev/urandom Linux'un
+kriptografik rastgele veri kaynağıdır. Her dosya header (54 byte) ve body olarak ikiye
+ayrılıyor. sha256sum ile hashleniyor ve awk ile sadece 64 karakterlik hash değeri
+dosyaya yazılıyor. Newline eklenmeden yazılması kritik öneme sahip çünkü ileride dd
+ile okunurken boyutun tam 64 byte olması gerekiyor.
+
+HANCI
+
+dd if=/dev/urandom bs=1 count=24054  of=plainmessage1.bmp 2>/dev/null
+echo "plainmessage1.bmp oluşturuldu"
+dd if=/dev/urandom bs=1 count=90054  of=plainmessage2.bmp 2>/dev/null
+echo "plainmessage2.bmp oluşturuldu"
+dd if=/dev/urandom bs=1 count=230454 of=plainmessage3.bmp 2>/dev/null
+echo "plainmessage3.bmp oluşturuldu"
+dd if=/dev/urandom bs=1 count=360054 of=plainmessage4.bmp 2>/dev/null
+echo "plainmessage4.bmp oluşturuldu"
+dd if=/dev/urandom bs=1 count=921654 of=plainmessage5.bmp 2>/dev/null
+echo "plainmessage5.bmp oluşturuldu"
+
+ls -lh plainmessage*.bmp
+
+dd if=plainmessage1.bmp of=plainheader1.bin bs=1 count=54 2>/dev/null
+tail -c +55 plainmessage1.bmp > plainbody1.bin
+dd if=plainmessage2.bmp of=plainheader2.bin bs=1 count=54 2>/dev/null
+tail -c +55 plainmessage2.bmp > plainbody2.bin
+dd if=plainmessage3.bmp of=plainheader3.bin bs=1 count=54 2>/dev/null
+tail -c +55 plainmessage3.bmp > plainbody3.bin
+dd if=plainmessage4.bmp of=plainheader4.bin bs=1 count=54 2>/dev/null
+tail -c +55 plainmessage4.bmp > plainbody4.bin
+dd if=plainmessage5.bmp of=plainheader5.bin bs=1 count=54 2>/dev/null
+tail -c +55 plainmessage5.bmp > plainbody5.bin
+
+wc -c plainheader*.bin
+
+sha256sum plainheader1.bin | awk '{printf "%s", $1}' > plainheader1hash.txt
+sha256sum plainheader2.bin | awk '{printf "%s", $1}' > plainheader2hash.txt
+sha256sum plainheader3.bin | awk '{printf "%s", $1}' > plainheader3hash.txt
+sha256sum plainheader4.bin | awk '{printf "%s", $1}' > plainheader4hash.txt
+sha256sum plainheader5.bin | awk '{printf "%s", $1}' > plainheader5hash.txt
+
+cat plainheader1hash.txt
+
+BÖLÜM 8 — 500x500 BMP İŞLEMLERİ
+
+GIMP ile hazırlanan 500x500.bmp HANCI klasörüne alınıyor. GIMP dosyaya ekstra renk profili
+(ICC metadata) eklediğinden header boyutu standart 54 byte yerine 138 byte oluyor. Bunu
+bilmeden 54 byte kessek body bozulurdu. Python ile BMP dosyasının 10-14. byte'ları okunuyor,
+bu alanda piksel verisinin nerede başladığı yazıyor ve OFFSET değişkenine atanıyor. Bu
+değer dd ve tail komutlarında kullanılıyor. Dört farklı hash üretiliyor: header hash
+başlığın, body hash gövdenin, ZIP hash sıkıştırılmış verinin doğruluğunu, boyut hash ise
+lookup tablosunda boyutu bulmayı sağlıyor. Header ve hash dosyaları AKINCI'ya kopyalanıyor.
+
+HANCI
+
+cp ~/Documents/500x500.bmp .
+wc -c 500x500.bmp
+file 500x500.bmp
+
+OFFSET=$(python3 -c "
+import struct
+with open('500x500.bmp','rb') as f:
+    data = f.read()
+print(struct.unpack('<I', data[10:14])[0])
+")
+echo "Header offset: $OFFSET byte"
+
+dd if=500x500.bmp of=500x500header.bin bs=1 count=$OFFSET 2>/dev/null
+tail -c +$(( OFFSET + 1 )) 500x500.bmp > 500x500body.bin
+echo "500x500header.bin : $(wc -c < 500x500header.bin) byte"
+echo "500x500body.bin   : $(wc -c < 500x500body.bin) byte"
+
+sha256sum 500x500header.bin | awk '{printf "%s", $1}' > 500x500headerhash.txt
+echo "Header hash: $(cat 500x500headerhash.txt)"
+
+cp plainheader1.bin      ../AKINCI/
+cp plainheader2.bin      ../AKINCI/
+cp plainheader3.bin      ../AKINCI/
+cp plainheader4.bin      ../AKINCI/
+cp plainheader5.bin      ../AKINCI/
+cp plainheader1hash.txt  ../AKINCI/
+cp plainheader2hash.txt  ../AKINCI/
+cp plainheader3hash.txt  ../AKINCI/
+cp plainheader4hash.txt  ../AKINCI/
+cp plainheader5hash.txt  ../AKINCI/
+cp 500x500header.bin     ../AKINCI/
+cp 500x500headerhash.txt ../AKINCI/
+echo "Kopyalama tamamlandı"
+
+sha256sum 500x500body.bin | awk '{printf "%s", $1}' > 500x500bodyhash.txt
+echo "Body hash: $(cat 500x500bodyhash.txt)"
+
+zip -j -9 500x500body.zip 500x500body.bin
+ls -lh 500x500body.zip
+
+sha256sum 500x500body.zip | awk '{printf "%s", $1}' > 500x500ziphash.txt
+echo "ZIP hash: $(cat 500x500ziphash.txt)"
+
+ZIP_BOYUT=$(wc -c < 500x500body.zip)
+echo "ZIP boyutu: $ZIP_BOYUT byte"
+
+python3 -c "b = $ZIP_BOYUT; print(f'800000 sınırı içinde: {b <= 800000}')"
+
+printf '%s' "$ZIP_BOYUT" | sha256sum | awk '{printf "%s", $1}' > boyuthash.txt
+echo "Boyut hash: $(cat boyuthash.txt)"
+
+
+BÖLÜM 9 — MAC PAKETİ, LCG DOLGU VE AES-CTR 
+
+Dört hash değeri ve ZIP binary verisi birleştirilerek payload oluşturuluyor. MAC paketinin
+ilk 256 byte'ı dört hash bloğundan oluşuyor: 0-63 header hash, 64-127 body hash, 128-191
+ZIP hash, 192-255 boyut hash. 256. byte'tan itibaren ZIP binary verisi geliyor. En sona
+LCG dolgusu ekleniyor. LCG formülü şu: X(n+1) = (1664525 × Xn + 1013904223) mod 2^32.
+Tohum değeri 1011. Paket boyutunu 16'nın katına tamamlamak için kullanılıyor. Print
+satırları stderr'a yönlendiriliyor çünkü stdout'a gitseydi binary dosyaya karışırdı ve
+dosya bozulurdu. AES şifrelemesinde K ve IV anahtar.txt'den okunuyor. Cipher BMP
+oluştururken sadece AES-CTR dosyası konulsaydı resmin büyük kısmı siyah kalır ve şifreli
+kısmın boyutu tahmin edilebilirdi. Bunu önlemek için AES-CTR dosyasının arkası LCG
+verileriyle body boyutuna tamamlanıyor. Böylece resmin tamamı şifreli görünüyor.
+
+HANCI
+
+cat \
+  500x500headerhash.txt \
+  500x500bodyhash.txt   \
+  500x500ziphash.txt    \
+  boyuthash.txt         \
+  500x500body.zip       \
+  > payload.bin
+echo "Payload: $(wc -c < payload.bin) byte"
+
+PAYLOAD_BOYUT=$(wc -c < payload.bin)
+
+python3 -c "
+import sys
+payload  = int(sys.argv[1])
+kalan    = payload % 16
+hizalama = (16 - kalan) % 16
+toplam   = 16 + hizalama
+print(f'Payload boyutu : {payload} byte',           file=sys.stderr)
+print(f'Toplam LCG     : {toplam} byte',            file=sys.stderr)
+print(f'Sonuç boyutu   : {payload + toplam} byte',  file=sys.stderr)
+print(f'16nın katı mı  : {(payload+toplam)%16==0}', file=sys.stderr)
+seed, a, c, m = 1011, 1664525, 1013904223, 2**32
+buf, x = bytearray(), seed
+for _ in range(toplam):
+    x = (a * x + c) % m
+    buf.append(x & 0xFF)
+sys.stdout.buffer.write(bytes(buf))
+" "$PAYLOAD_BOYUT" > lcg_dolgu.bin
+
+cat payload.bin lcg_dolgu.bin > 500x500mac.bin
+echo "MAC boyutu: $(wc -c < 500x500mac.bin) byte"
+python3 -c "b=$(wc -c < 500x500mac.bin); print(f'16nın katı mı: {b%16==0}')"
+
+AES_KEY=$(grep "KEY=" anahtar.txt | cut -d= -f2)
+AES_IV=$(grep "IV="  anahtar.txt | cut -d= -f2)
+echo "Kullanılan K  : $AES_KEY"
+echo "Kullanılan IV : $AES_IV"
+
+openssl enc -aes-256-ctr \
+  -nosalt -nopad \
+  -K  "$AES_KEY" \
+  -iv "$AES_IV"  \
+  -in  500x500mac.bin \
+  -out 500x500AES-CTR.bin
+echo "AES-CTR boyutu: $(wc -c < 500x500AES-CTR.bin) byte"
+
+BODY_BOYUT=$(wc -c < 500x500body.bin)
+AES_BOYUT=$(wc -c < 500x500AES-CTR.bin)
+KALAN=$(( BODY_BOYUT - AES_BOYUT ))
+echo "Doldurulacak: $KALAN byte"
+
+python3 -c "
+import sys
+n = int(sys.argv[1])
+seed, a, c, m = 1011, 1664525, 1013904223, 2**32
+buf, x = bytearray(), seed
+for _ in range(n):
+    x = (a * x + c) % m
+    buf.append(x & 0xFF)
+sys.stdout.buffer.write(bytes(buf))
+" "$KALAN" > goruntu_dolgu.bin
+
+cat 500x500header.bin \
+    500x500AES-CTR.bin \
+    goruntu_dolgu.bin \
+    > 500x500chiper.bmp
+echo "Cipher BMP : $(wc -c < 500x500chiper.bmp) byte"
+echo "Orijinal   : $(wc -c < 500x500.bmp) byte"
+
+eog 500x500chiper.bmp
+
+
+BÖLÜM 10 — GPG İMZALAMA VE TRANSFER
+
+HANCI, AES-CTR dosyasını GPG ile hem imzalıyor hem de AKINCI'nın açık anahtarıyla
+şifreliyor. İmzalama işlemi ile HANCI kendi özel anahtarını kullanarak "bu dosyayı ben
+gönderdim" kanıtını ekliyor. Şifreleme işlemi ile dosya AKINCI'nın açık anahtarıyla
+kilitleniyor, yalnızca AKINCI'nın özel anahtarı bu şifreyi çözebiliyor. Böylece hem
+gizlilik hem kimlik doğrulama aynı anda sağlanıyor. Oluşan dosya AKINCI klasörüne
+kopyalanıyor. Bu adım gerçek hayatta bir ağ transferini temsil ediyor.
+
+HANCI
+
+gpg --encrypt --sign \
+    --recipient akinci@gmail.com \
+    --local-user hanci@gmail.com\
+    500x500AES-CTR.bin
+
+ls -lh 500x500AES-CTR.bin.gpg
+
+cp 500x500AES-CTR.bin.gpg ../AKINCI/
+echo "Transfer tamamlandı: $(ls -lh ../AKINCI/500x500AES-CTR.bin.gpg)"
+
+
+
+BÖLÜM 11 — AKINCI: DOĞRULAMA VE GERİ KAZANIM
+
+AKINCI tarafı gelen şifreli dosyayı katman katman çözüyor ve her adımda doğrulama
+yapıyor. İlk olarak GPG şifresi çözülüyor ve HANCI'nın imzası doğrulanıyor. Terminalde
+"Good signature from HANCI" görünmesi gerekiyor. Ardından AES-CTR şifresi çözülüyor ve
+MAC paketine ulaşılıyor. dd komutuyla her biri 64 byte olan dört hash bloğu ayrıştırılıyor.
+Header hash doğrulamasında cmp komutu iki dosyayı bit bit karşılaştırıyor. Boyut hash'i
+grep ile boyut.txt'de aranıyor, satır sonuna dolar işareti konularak tam eşleşme sağlanıyor
+ve ZIP'in orijinal boyutu elde ediliyor. Bu boyut bilgisiyle dd komutu 256. byte'tan
+itibaren ZIP verisini ayırıyor, LCG dolgusu geride kalıyor ve atılıyor. ZIP doğrulanıyor,
+açılıyor, body doğrulanıyor ve son olarak header ile body birleştirilip orijinal BMP
+geri kazanılıyor.
+
+AKINCI
+
+gpg --decrypt \
+    --output 500x500AES-CTR.bin \
+    500x500AES-CTR.bin.gpg
+
+AES_KEY=$(grep "KEY=" anahtar.txt | cut -d= -f2)
+AES_IV=$(grep "IV="  anahtar.txt | cut -d= -f2)
+echo "Kullanılan K  : $AES_KEY"
+echo "Kullanılan IV : $AES_IV"
+
+openssl enc -d -aes-256-ctr \
+  -nosalt -nopad \
+  -K  "$AES_KEY" \
+  -iv "$AES_IV"  \
+  -in  500x500AES-CTR.bin \
+  -out 500x500mac.bin
+echo "MAC boyutu: $(wc -c < 500x500mac.bin) byte"
+
+dd if=500x500mac.bin bs=1 skip=0   count=64 of=500x500headercheck.txt 2>/dev/null
+echo "1. Header check: $(cat 500x500headercheck.txt)"
+dd if=500x500mac.bin bs=1 skip=64  count=64 of=500x500bodycheck.txt   2>/dev/null
+echo "2. Body check  : $(cat 500x500bodycheck.txt)"
+dd if=500x500mac.bin bs=1 skip=128 count=64 of=500x500zipcheck.txt    2>/dev/null
+echo "3. ZIP check   : $(cat 500x500zipcheck.txt)"
+dd if=500x500mac.bin bs=1 skip=192 count=64 of=boyuthash_check.txt    2>/dev/null
+echo "4. Boyut check : $(cat boyuthash_check.txt)"
+
+cmp -s 500x500headercheck.txt 500x500headerhash.txt \
+  && echo "✔ HEADER DOĞRULANDI" \
+  || echo "✖ HATA"
+
+ARANAN=$(cat boyuthash_check.txt)
+echo "Aranan hash: $ARANAN"
+ZIP_BOYUT=$(grep -m1 ":${ARANAN}$" boyut.txt | cut -d: -f1)
+echo "✔ ZIP boyutu bulundu: $ZIP_BOYUT byte"
+
+dd if=500x500mac.bin bs=1 skip=256 count=$ZIP_BOYUT \
+   of=500x500body.zip 2>/dev/null
+echo "Ayrılan ZIP: $(wc -c < 500x500body.zip) byte"
+
+HESAPLANAN=$(sha256sum 500x500body.zip | awk '{printf "%s", $1}')
+BEKLENEN=$(cat 500x500zipcheck.txt)
+[ "$HESAPLANAN" = "$BEKLENEN" ] \
+  && echo "✔ ZIP DOĞRULANDI" \
+  || echo "✖ HATA"
+
+unzip -o 500x500body.zip -d .
+echo "Çıkarılan: $(ls -lh 500x500body.bin)"
+
+HESAPLANAN=$(sha256sum 500x500body.bin | awk '{printf "%s", $1}')
+BEKLENEN=$(cat 500x500bodycheck.txt)
+[ "$HESAPLANAN" = "$BEKLENEN" ] \
+  && echo "✔ BODY DOĞRULANDI" \
+  || echo "✖ HATA"
+
+cat 500x500header.bin 500x500body.bin > 500x500_recovered.bmp
+echo "Recovered BMP: $(wc -c < 500x500_recovered.bmp) byte"
+
+cmp -s ../HANCI/500x500.bmp 500x500_recovered.bmp \
+  && echo "✔ MÜKEMMEL — Orijinal ile birebir aynı!" \
+  || echo "✖ Dosyalar farklı!"
+
+eog 500x500_recovered.bmp
+
+
+
+BÖLÜM 12 — SON KONTROL
+
+
+Tüm sistemin doğru çalıştığını doğruluyoruz. Boyut kontrolleri her dosyanın beklenen
+boyutta olduğunu ve MAC dosyasının 16'nın katı olduğunu gösteriyor. Hash doğrulamaları
+her iki taraftaki değerlerin eşleştiğini kontrol ediyor. Dosya bütünlüğü kontrolünde
+cmp komutu orijinal ve kurtarılan BMP'yi bit bit karşılaştırıyor. Tek bir bit bile
+farklı olsaydı bunu raporlardı. Tüm çıktılar başarılı görünüyorsa sistem eksiksiz
+çalışmış demektir.
+
+HANCI
+
+echo "════════════════════════════════════════"
+echo "  HANCI TARAF BOYUT KONTROLLERİ"
+echo "════════════════════════════════════════"
+echo "500x500.bmp       : $(wc -c < 500x500.bmp) byte"
+echo "500x500header.bin : $(wc -c < 500x500header.bin) byte"
+echo "500x500body.bin   : $(wc -c < 500x500body.bin) byte"
+echo "500x500mac.bin    : $(wc -c < 500x500mac.bin) byte"
+python3 -c "b=$(wc -c < 500x500mac.bin); print(f'16nın katı mı   : {b%16==0}')"
+echo "500x500chiper.bmp : $(wc -c < 500x500chiper.bmp) byte"
+
+AKINCI
+
+echo "════════════════════════════════════════"
+echo "  AKINCI TARAF HASH DOĞRULAMALARİ"
+echo "════════════════════════════════════════"
+
+cmp -s 500x500headercheck.txt 500x500headerhash.txt \
+  && echo "Header hash    : ✔ EŞLEŞİYOR" || echo "Header hash    : ✖ HATA"
+
+H=$(sha256sum 500x500body.zip | awk '{printf "%s",$1}')
+[ "$H" = "$(cat 500x500zipcheck.txt)" ] \
+  && echo "ZIP hash       : ✔ EŞLEŞİYOR" || echo "ZIP hash       : ✖ HATA"
+
+H=$(sha256sum 500x500body.bin | awk '{printf "%s",$1}')
+[ "$H" = "$(cat 500x500bodycheck.txt)" ] \
+  && echo "Body hash      : ✔ EŞLEŞİYOR" || echo "Body hash      : ✖ HATA"
+
+echo ""
+echo "════════════════════════════════════════"
+echo "  DOSYA BÜTÜNLÜĞÜ"
+echo "════════════════════════════════════════"
+cmp -s ../HANCI/500x500.bmp 500x500_recovered.bmp \
+  && echo "Orijinal = Kurtarılan : ✔ BİREBİR AYNI" \
+  || echo "Orijinal ≠ Kurtarılan : ✖ FARKLI"
+
+
+İŞ AKIŞI ÖZETI
+
+Bölüm  1  HANCI VE AKINCI→ Kurulum ve klasörler
+Bölüm  2  HANCI VE AKINCI → GPG anahtar üretimi (paralel)
+Bölüm  3  HANCI VE AKINCI → Anahtar paylaşımı ve güven (paralel)
+Bölüm  4  HANCI → GPG testi
+Bölüm  5  HANCI → AKINCI → AES anahtarı üretimi ve iletimi
+Bölüm  6  AKINCI → Lookup tablosu (2-3 dakika)
+Bölüm  7  HANCI → 5 plainmessage BMP
+Bölüm  8  HANCI→ AKINCI → 500x500 BMP işlemleri ve kopyalama
+Bölüm  9  HANCI  → MAC paketi, LCG dolgu, AES-CTR şifreleme
+Bölüm 10  HANCI → AKINCI → GPG imzalama ve transfer
+Bölüm 11  AKINCI → Doğrulama ve BMP geri kazanımı
+Bölüm 12  HANCI VE AKINCI → Son kontrol

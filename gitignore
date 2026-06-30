@@ -1,0 +1,53 @@
+# ═══════════════════════════════════════════════════════
+# KRİTİK — GİZLİ ANAHTARLAR VE SIRLAR
+# Bunlar ASLA GitHub'a yüklenmemeli
+# ═══════════════════════════════════════════════════════
+anahtar.txt
+*.key
+*_priv.asc
+secring.gpg
+private-keys-v1.d/
+
+# GPG anahtar deposu (sistem genelinde, proje klasöründe olmaz ama önlem)
+.gnupg/
+
+# ═══════════════════════════════════════════════════════
+# BÜYÜK / TEKRAR ÜRETİLEBİLİR DOSYALAR
+# 800.000 satırlık lookup tablosu ~50+ MB olabilir,
+# GitHub'a yüklemek yerine docs/rehber.txt'teki
+# komutla yeniden üretilmesi önerilir
+# ═══════════════════════════════════════════════════════
+boyut.txt
+
+# ═══════════════════════════════════════════════════════
+# ÜRETİLEN ARA DOSYALAR (her çalıştırmada yeniden oluşur)
+# ═══════════════════════════════════════════════════════
+HANCI/*.bmp
+HANCI/*.bin
+HANCI/*.zip
+HANCI/*.gpg
+HANCI/*.asc
+AKINCI/*.bmp
+AKINCI/*.bin
+AKINCI/*.zip
+AKINCI/*.gpg
+AKINCI/*.asc
+AKINCI/boyut.txt
+*.bin
+payload.bin
+lcg_dolgu.bin
+goruntu_dolgu.bin
+
+# Test çıktıları
+test_mesaj.txt
+test_mesaj.txt.gpg
+
+# ═══════════════════════════════════════════════════════
+# SİSTEM / EDİTÖR DOSYALARI
+# ═══════════════════════════════════════════════════════
+.DS_Store
+*.swp
+*~
+.vscode/
+__pycache__/
+*.pyc
